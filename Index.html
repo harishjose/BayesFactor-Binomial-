@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bayes Factor Calculator</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/numeric/1.2.6/numeric.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 20px auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .calculator {
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .input-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input[type="number"] {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        .radio-group {
+            margin-bottom: 15px;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            width: 100%;
+            font-size: 16px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        #result {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #e8f5e9;
+            border-radius: 4px;
+            text-align: center;
+            font-size: 18px;
+            font-weight: bold;
+        }
+        .error {
+            color: red;
+            margin-top: 5px;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="calculator">
+        <h2>Bayes Factor Calculator For Attribute Testing (Bayesian Binomial Test)</h2>
+        
+        <div class="input-group">
+            <label for="successes">Successes:</label>
+            <input type="number" id="successes" min="0" step="1">
+        </div>
+
+        <div class="input-group">
+            <label for="trials">Total Trials:</label>
+            <input type="number" id="trials" min="0" step="1">
+        </div>
+
+        <div class="input-group">
+            <label for="testValue">Test Value:</label>
+            <input type="number" id="testValue" value="0.9" min="0" max="1" step="0.1">
+        </div>
+
+        <div class="input-group">
+            <label for="priorA">Prior Parameter A:</label>
+            <input type="number" id="priorA" value="1" min="0" step="0.1">
+        </div>
+
+        <div class="input-group">
+            <label for="priorB">Prior Parameter B:</label>
+            <input type="number" id="priorB" value="1" min="0" step="0.1">
+        </div>
+
+        <div class="radio-group">
+            <label>Test Direction:</label>
+            <div>
+                <input type="radio" id="greater" name="direction" value="greater" checked>
+                <label for="greater">Greater than test value</label>
+            </div>
+            <div>
+                <input type="radio" id="less" name="direction" value="less">
+                <label for="less">Less than test value</label>
+            </div>
+            <div>
+                <input type="radio" id="two-sided" name="direction" value="two-sided">
+                <label for="two-sided">Two-sided test</label>
+            </div>
+        </div>
+
+        <button onclick="calculateBayesFactor()">Calculate Bayes Factor</button>
+        <div id="result">Bayes Factor: N/A</div>
+    </div>
+
+    <script>
+        // Mathematical helper functions
+        function logGamma(x) {
+            // Lanczos approximation for log gamma function
+            const p = [676.5203681218851, -1259.1392167224028, 771.32342877765313,
+                      -176.61502916214059, 12.507343278686905, -0.13857109526572012,
+                      9.9843695780195716e-6, 1.5056327351493116e-7];
+            
+            let y = x;
+            let sum = 0.99999999999980993;
+            for (let i = 0; i < p.length; i++) {
+                sum += p[i] / (y + i);
+            }
+            
+            const t = y + p.length - 1.5;
+            return Math.log(2.5066282746310005 * sum) + (y - 0.5) * Math.log(t) - t;
+        }
+
+        function logBeta(a, b) {
+            return logGamma(a) + logGamma(b) - logGamma(a + b);
+        }
+
+        function betainc(x, a, b) {
+            // Incomplete beta function approximation
+            // This is a simplified version and might not be as accurate as scipy's implementation
+            if (x <= 0) return 0;
+            if (x >= 1) return 1;
+            
+            const bt = Math.exp(logGamma(a + b) - logGamma(a) - logGamma(b) +
+                              a * Math.log(x) + b * Math.log(1 - x));
+            
+            if (x < (a + 1) / (a + b + 2)) {
+                return bt * betacf(x, a, b) / a;
+            }
+            return 1 - bt * betacf(1 - x, b, a) / b;
+        }
+
+        function betacf(x, a, b) {
+            const MAXIT = 100;
+            const EPS = 3e-7;
+            const qab = a + b;
+            const qap = a + 1;
+            const qam = a - 1;
+            let c = 1;
+            let d = 1 - qab * x / qap;
+            if (Math.abs(d) < EPS) d = EPS;
+            d = 1 / d;
+            let h = d;
+            
+            for (let m = 1; m <= MAXIT; m++) {
+                const m2 = 2 * m;
+                let aa = m * (b - m) * x / ((qam + m2) * (a + m2));
+                d = 1 + aa * d;
+                if (Math.abs(d) < EPS) d = EPS;
+                c = 1 + aa / c;
+                if (Math.abs(c) < EPS) c = EPS;
+                d = 1 / d;
+                h *= d * c;
+                aa = -(a + m) * (qab + m) * x / ((a + m2) * (qap + m2));
+                d = 1 + aa * d;
+                if (Math.abs(d) < EPS) d = EPS;
+                c = 1 + aa / c;
+                if (Math.abs(c) < EPS) c = EPS;
+                d = 1 / d;
+                const del = d * c;
+                h *= del;
+                if (Math.abs(del - 1) < EPS) break;
+            }
+            return h;
+        }
+
+        function simpsonsRule(f, a, b, n = 1000) {
+            const h = (b - a) / n;
+            let sum = f(a) + f(b);
+            
+            for (let i = 1; i < n; i += 2) {
+                sum += 4 * f(a + i * h);
+            }
+            
+            for (let i = 2; i < n - 1; i += 2) {
+                sum += 2 * f(a + i * h);
+            }
+            
+            return (h / 3) * sum;
+        }
+
+        function calculateBayesFactor() {
+            // Get input values
+            const successes = parseInt(document.getElementById('successes').value);
+            const trials = parseInt(document.getElementById('trials').value);
+            const testValue = parseFloat(document.getElementById('testValue').value);
+            const priorA = parseFloat(document.getElementById('priorA').value);
+            const priorB = parseFloat(document.getElementById('priorB').value);
+            const direction = document.querySelector('input[name="direction"]:checked').value;
+
+            // Validate inputs
+            if (isNaN(successes) || isNaN(trials) || isNaN(testValue) || isNaN(priorA) || isNaN(priorB)) {
+                document.getElementById('result').innerHTML = 'Error: Please enter valid numbers';
+                return;
+            }
+
+            if (trials < successes) {
+                document.getElementById('result').innerHTML = 'Error: Trials must be >= successes';
+                return;
+            }
+
+            if (testValue <= 0 || testValue >= 1) {
+                document.getElementById('result').innerHTML = 'Error: Test value must be between 0 and 1';
+                return;
+            }
+
+            // Calculate likelihood under null hypothesis
+            const likelihoodNull = Math.pow(testValue, successes) * 
+                                 Math.pow(1 - testValue, trials - successes);
+
+            // Calculate marginal likelihood under alternative hypothesis
+            const integrand = (theta) => {
+                const logLike = successes * Math.log(theta) + 
+                              (trials - successes) * Math.log(1 - theta);
+                const logPrior = (priorA - 1) * Math.log(theta) + 
+                               (priorB - 1) * Math.log(1 - theta) - 
+                               logBeta(priorA, priorB);
+                return Math.exp(logLike + logPrior);
+            };
+
+            let lower, upper, normConst;
+            if (direction === 'greater') {
+                lower = testValue;
+                upper = 0.9999;
+                normConst = 1 - betainc(testValue, priorA, priorB);
+            } else if (direction === 'less') {
+                lower = 0.0001;
+                upper = testValue;
+                normConst = betainc(testValue, priorA, priorB);
+            } else {
+                lower = 0.0001;
+                upper = 0.9999;
+                normConst = 1;
+            }
+
+            const likelihoodAlt = simpsonsRule(integrand, lower, upper) / normConst;
+            const bayesFactor = likelihoodAlt / likelihoodNull;
+
+            document.getElementById('result').innerHTML = 
+                `Bayes Factor: ${bayesFactor.toFixed(4)}`;
+        }
+    </script>
+</body>
+</html>
